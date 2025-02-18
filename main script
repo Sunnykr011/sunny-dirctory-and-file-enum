@@ -1,0 +1,91 @@
+#!/usr/bin/env python3  
+
+import requests  
+import threading  
+import queue  
+import argparse  
+import os  
+import sys  
+import colorama  
+from urllib.parse import urljoin  
+from concurrent.futures import ThreadPoolExecutor, as_completed  
+
+class AdvancedWebEnumerator:  
+    def __init__(self, target_url, wordlist, output_dir):  
+        self.target_url = target_url.rstrip('/')  
+        self.wordlist = wordlist  
+        self.output_dir = output_dir  
+        self.discovered_paths = set()  
+        self.valid_status_codes = [200, 204, 301, 302, 403]  
+        
+        # Colorama initialization  
+        colorama.init(autoreset=True)  
+        
+        # Create output directory if not exists  
+        os.makedirs(output_dir, exist_ok=True)  
+
+    def load_wordlist(self):  
+        try:  
+            with open(self.wordlist, 'r') as f:  
+                return [line.strip() for line in f]  
+        except FileNotFoundError:  
+            print(f"{colorama.Fore.RED}[!] Wordlist file not found!")  
+            sys.exit(1)  
+
+    def check_path(self, path):  
+        full_url = urljoin(self.target_url, path)  
+        try:  
+            response = requests.head(full_url, timeout=5, allow_redirects=True)  
+            
+            if response.status_code in self.valid_status_codes:  
+                print(f"{colorama.Fore.GREEN}[+] Found: {full_url} - Status: {response.status_code}")  
+                return {  
+                    'url': full_url,  
+                    'status_code': response.status_code,  
+                    'content_type': response.headers.get('Content-Type', 'Unknown')  
+                }  
+        except requests.RequestException:  
+            pass  
+        return None  
+
+    def parallel_enumeration(self, paths, max_threads=20):  
+        results = []  
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:  
+            futures = {executor.submit(self.check_path, path): path for path in paths}  
+            
+            for future in as_completed(futures):  
+                result = future.result()  
+                if result:  
+                    results.append(result)  
+        
+        return results  
+
+    def save_results(self, results):  
+        output_file = os.path.join(self.output_dir, 'enumeration_results.json')  
+        import json  
+        
+        with open(output_file, 'w') as f:  
+            json.dump(results, f, indent=4)  
+        
+        print(f"{colorama.Fore.CYAN}[*] Results saved to {output_file}")  
+
+def main():  
+    parser = argparse.ArgumentParser(description="Advanced Web Directory Enumerator")  
+    parser.add_argument('-u', '--url', required=True, help='Target URL to enumerate')  
+    parser.add_argument('-w', '--wordlist', default='wordlists/common.txt',   
+                        help='Path to wordlist file')  
+    parser.add_argument('-o', '--output', default='results',   
+                        help='Output directory for results')  
+    
+    args = parser.parse_args()  
+
+    enumerator = AdvancedWebEnumerator(args.url, args.wordlist, args.output)  
+    paths = enumerator.load_wordlist()  
+    
+    print(f"{colorama.Fore.YELLOW}[*] Starting directory enumeration...")  
+    results = enumerator.parallel_enumeration(paths)  
+    
+    enumerator.save_results(results)  
+
+if __name__ == '__main__':  
+    main()
